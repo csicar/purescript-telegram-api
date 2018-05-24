@@ -13,7 +13,7 @@ import DOM.File.FileReader (result)
 import Data.Argonaut (Json)
 import Data.Array (filter)
 import Data.Either (Either(..))
-import Data.Foldable (for_)
+import Data.Foldable (for_, maximum)
 import Data.Foreign (ForeignError)
 import Data.Foreign.Class (class Decode)
 import Data.Foreign.Generic (decodeJSON, defaultOptions, genericDecode)
@@ -22,10 +22,10 @@ import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.HTTP.Method (Method(..))
 import Data.List.Types (NonEmptyList)
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Newtype (class Newtype, unwrap)
 import Data.Tuple.Nested ((/\))
-import Debug.Trace (trace, traceA, traceShow, traceShowA, traceShowM)
+import Debug.Trace (spy, trace, traceA, traceShow, traceShowA, traceShowM)
 import Network.HTTP.Affjax (AJAX, affjax, defaultRequest, get)
 import Type.Data.Boolean (kind Boolean)
 
@@ -37,18 +37,24 @@ baseURL = "https://api.telegram.org/bot"
 
 pollUpdates :: ∀acc. BotApiToken → (acc → ParsedUpdates → Aff _ acc) → acc → Aff _ Unit
 pollUpdates token onUpdate i = 
-  tailRecM f i
+  tailRecM f (i /\ 0)
   where
-   f acc = do
+   f (acc /\ updateId) = do
     updates <- getUpdates token 0
     logShow updates
     delay (Milliseconds 5000.0)
     ret <- onUpdate acc updates
-    pure $ Loop ret
+    let newUpdateId = maybeGetUpdateId updates
+    pure $ Loop (ret /\ fromMaybe updateId newUpdateId)
+
+   maybeGetUpdateId :: ParsedUpdates → Maybe Int
+   maybeGetUpdateId (Right (GetUpdates updates)) = maximum $ map (unwrap >>> _.update_id) updates.result
+   maybeGetUpdateId (Left _) = Nothing
 
 getUpdates :: ∀e. BotApiToken → Int → Aff (ajax :: AJAX, console :: CONSOLE | e) ParsedUpdates
 getUpdates token offset = do
-  res <- affjax $ defaultRequest { url = baseURL <> token <> "/getUpdates", method = Left GET }
+  let options = encode $ fromArray ["offset" /\ Just (show offset)]
+  res <- affjax $ defaultRequest { url = spy $ baseURL <> token <> "/getUpdates?" <> options, method = Left GET }
   let parsed = parseMessage res.response
   liftEff $ log res.response
   pure parsed

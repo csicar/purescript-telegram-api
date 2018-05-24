@@ -1,0 +1,21 @@
+{
+  "name": "purescript-telegram-api",
+  "version": "1.0.0",
+  "description": "Wrapper for the Telegram Bots REST-API",
+  "main": "src/Web/Telegram/API/Bot.purs",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "pulp test"
+  },
+  "keywords": [
+    "Telegram",
+    "Purescript"
+  ],
+  "author": "csicar",
+  "license": "LGPL-2.0",
+  "dependencies": {
+    "xhr2": "^0.1.4"
+  }
+}
