@@ -40,11 +40,11 @@ pollUpdates token onUpdate i =
   tailRecM f (i /\ 0)
   where
    f (acc /\ updateId) = do
-    updates <- getUpdates token 0
+    updates <- getUpdates token updateId
     logShow updates
     delay (Milliseconds 5000.0)
     ret <- onUpdate acc updates
-    let newUpdateId = maybeGetUpdateId updates
+    let newUpdateId = map (_ + 1) $ maybeGetUpdateId updates
     pure $ Loop (ret /\ fromMaybe updateId newUpdateId)
 
    maybeGetUpdateId :: ParsedUpdates → Maybe Int
