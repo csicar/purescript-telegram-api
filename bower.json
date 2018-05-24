@@ -1,0 +1,39 @@
+{
+  "name": "purescript-telegram-api",
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "output",
+    "test",
+    "tests"
+  ],
+  "dependencies": {
+    "purescript-prelude": "^4.0.0",
+    "purescript-console": "^3.0.0",
+    "purescript-affjax": "^5.0.0",
+    "purescript-argonaut": "^3.1.0",
+    "purescript-foreign": "^4.0.1",
+    "purescript-foreign-generic": "^6.0.0",
+    "purescript-generics-rep": "^5.4.0",
+    "purescript-debug": "^3.0.0",
+    "purescript-form-urlencoded": "^3.0.0"
+  },
+  "devDependencies": {
+    "purescript-psci-support": "^3.0.0"
+  },
+  "resolutions": {
+    "purescript-prelude": "^3.0.0"
+  },
+  "authors": [
+    "Carsten Csiky (csicar) <carsten.csiky@gmail.com>"
+  ],
+  "description": "Wrapper for the Telegram Bots REST-API",
+  "main": "src/Web/Telegram/API/Bot.purs",
+  "keywords": [
+    "Telegram",
+    "Purescript"
+  ],
+  "license": "LGPL",
+  "homepage": ""
+}
