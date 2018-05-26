@@ -22,6 +22,7 @@ import Data.HTTP.Method (Method(..))
 import Data.List.Types (NonEmptyList)
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Newtype (class Newtype, unwrap)
+import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested ((/\))
 import Debug.Trace (spy)
 import Network.HTTP.Affjax (AJAX, affjax, defaultRequest, get)
@@ -64,10 +65,12 @@ getUpdates opt offset = do
 	liftEff $ log res.response
 	pure parsed
 
-sendMessage :: ∀e. ApiOptions → ChannelId → String → Aff (ajax :: AJAX | e) Json
-sendMessage opt channelId message = do
-	let options = encode $ fromArray ["chat_id" /\ Just (show channelId), "text" /\ Just message]
-	res <- get (opt.baseUrl <> opt.token <> "/sendMessage?" <> options)
+type SendMessageOptions = Array (Tuple String (Maybe String))
+
+sendMessage :: ∀e. ApiOptions → SendMessageOptions → ChannelId → String → Aff (ajax :: AJAX | e) Json
+sendMessage apiOpts sendOpts channelId message = do
+	let options = encode $ fromArray $ sendOpts <> ["chat_id" /\ Just (show channelId), "text" /\ Just message]
+	res <- get (apiOpts.baseUrl <> apiOpts.token <> "/sendMessage?" <> options)
 	pure res.response
 
 parseMessage :: String → Either (NonEmptyList ForeignError) GetUpdates
@@ -75,13 +78,14 @@ parseMessage msg = runExcept $ decodeJSON msg
 
 type ChannelId = Int
 
+-- | [User Object](https://core.telegram.org/bots/api#user)
 newtype User = User
 	{ id :: Int
 	, is_bot :: Boolean
-	, first_name :: String
-	, last_name :: String
-	, username :: String
-	, language_code :: String
+	, first_name :: Maybe String
+	, last_name :: Maybe String
+	, username :: Maybe String
+	, language_code :: Maybe String
 	}
 
 derive instance genericUser :: Generic User _
@@ -94,6 +98,8 @@ newtype MessageEntity = MessageEntity
 	{ offset :: Int
 	, length :: Int
 	, type :: String
+	, url :: Maybe String
+	, user :: Maybe User
 	}
 
 derive instance genericMessageEntity :: Generic MessageEntity _
@@ -102,12 +108,20 @@ instance showMessageEntity ∷ Show MessageEntity where show = genericShow
 
 instance decodeMessageEntity :: Decode MessageEntity where decode = genericDecode $ FG.defaultOptions {unwrapSingleConstructors = true}
 
+-- | Chat for [Chat Object](https://core.telegram.org/bots/api#chat)
 newtype Chat = Chat
 	{ id :: Int
-	, first_name :: String
-	, last_name :: String
-	, username :: String
 	, type :: String
+	, title :: Maybe String
+	, username :: Maybe String
+	, first_name :: Maybe String
+	, last_name :: Maybe String
+	, all_members_are_administrators :: Maybe Boolean
+	, description :: Maybe String
+	, invite_link :: Maybe String
+	, pinned_message :: Maybe Message
+	, sticker_set_name :: Maybe String
+	, can_set_sticker_set :: Maybe Boolean
 	}
 
 derive instance genericChat :: Generic Chat _
@@ -116,24 +130,52 @@ instance showChat ∷ Show Chat where show = genericShow
 
 instance decodeChat ∷ Decode Chat where decode = genericDecode $ FG.defaultOptions {unwrapSingleConstructors = true} 
 
+-- | Message for [Message Object](https://core.telegram.org/bots/api#message)
 newtype Message = Message
 	{ message_id :: Int
-	, from :: User
-	, chat :: Chat
+	, from :: Maybe User
 	, date :: Int
-	, text :: String
+	, chat :: Chat
+	, text :: Maybe String	
+	, forward_from :: Maybe User
+	, forward_from_chat :: Maybe Chat
+	, forward_from_message_id :: Maybe Int
+	, forward_signature :: Maybe String
+	, forward_date :: Maybe Int
+	, reply_to_message :: Maybe Message
+	, edit_date :: Maybe Int
+	, media_group_id :: Maybe String
+	, author_signature :: Maybe String
+	, entities :: Maybe (Array MessageEntity)
+	, caption_entities :: Maybe (Array MessageEntity)
+	, caption :: Maybe String
+	, new_chat_members :: Maybe (Array User)
+	, left_chat_member :: Maybe User
+	, new_chat_title :: Maybe String
+	, delete_chat_photo :: Maybe Boolean
+	, group_chat_created :: Maybe Boolean
+	, supergroup_chat_created :: Maybe Boolean
+	, channel_chat_created :: Maybe Boolean
+	, migrate_to_chat_id :: Maybe Int
+	, migrate_from_chat_id :: Maybe Int
+	, pinned_message :: Maybe Message
+	, connected_website :: Maybe String
 	}
 
 derive instance genericMessage :: Generic Message _
 derive instance newtypeMessage ∷ Newtype Message _
 
-instance showMessage ∷ Show Message where show = genericShow
+instance showMessage ∷ Show Message where show x = genericShow x
 
-instance decodeMessage ∷ Decode Message where decode = genericDecode $ FG.defaultOptions {unwrapSingleConstructors = true}
+instance decodeMessage ∷ Decode Message where decode x = genericDecode (FG.defaultOptions {unwrapSingleConstructors = true}) x
 
+-- | Update for [Update Object](https://core.telegram.org/bots/api#update)
 newtype Update = Update 
 	{ update_id :: Int
-	, message :: Message
+	, message :: Maybe Message
+	, edited_message :: Maybe Message
+	, channel_post :: Maybe Message
+	, edited_channel_post :: Maybe Message
 	}
 
 derive instance genericUpdate :: Generic Update _
