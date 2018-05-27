@@ -17,7 +17,8 @@
     "purescript-foreign-generic": "^6.0.0",
     "purescript-generics-rep": "^5.4.0",
     "purescript-debug": "^3.0.0",
-    "purescript-form-urlencoded": "^3.0.0"
+    "purescript-form-urlencoded": "^3.0.0",
+    "purescript-default": "git@github.com:csicar/purescript-default.git"
   },
   "devDependencies": {
     "purescript-psci-support": "^3.0.0"

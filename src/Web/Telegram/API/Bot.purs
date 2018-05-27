@@ -8,12 +8,13 @@ import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Except (runExcept)
 import Control.Monad.Rec.Class (Step(Loop), tailRecM)
-import Data.Argonaut (Json)
+import Data.Argonaut (JBoolean, Json, encodeJson)
+import Data.Default (class Default, class PartialDefault, default, withRequired)
 import Data.Either (Either(..))
 import Data.Foldable (maximum)
 import Data.Foreign (ForeignError)
 import Data.Foreign.Class (class Decode)
-import Data.Foreign.Generic (decodeJSON, genericDecode)
+import Data.Foreign.Generic (decodeJSON, encodeJSON, genericDecode)
 import Data.Foreign.Generic as FG
 import Data.FormURLEncoded (encode, fromArray)
 import Data.Generic.Rep (class Generic)
@@ -23,21 +24,20 @@ import Data.List.Types (NonEmptyList)
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Newtype (class Newtype, unwrap)
 import Data.Tuple (Tuple(..))
-import Data.Tuple.Nested ((/\))
+import Data.Tuple.Nested ((/\), type (/\))
 import Debug.Trace (spy)
 import Network.HTTP.Affjax (AJAX, affjax, defaultRequest, get)
 import Type.Data.Boolean (kind Boolean)
 
 type ParsedUpdates = Either (NonEmptyList ForeignError) GetUpdates
-type BotApiToken = String
 
-type ApiOptions = 
-	{ token ∷ BotApiToken
+newtype ApiOptions = ApiOptions
+	{ token ∷ String
 	, baseUrl ∷ String
 	}
 
-defaultOptions :: BotApiToken → ApiOptions
-defaultOptions token = {token, baseUrl}
+instance defaultApiOptions ∷ PartialDefault ApiOptions { token ∷ String } where
+  withRequired {token} = ApiOptions {token, baseUrl}
 	where
 		baseUrl = "https://api.telegram.org/bot"
 
@@ -58,25 +58,64 @@ pollUpdates options onUpdate i =
 		maybeGetUpdateId (Left _) = Nothing
 
 getUpdates :: ∀e. ApiOptions → Int → Aff (ajax :: AJAX, console :: CONSOLE | e) ParsedUpdates
-getUpdates opt offset = do
+getUpdates (ApiOptions opt) offset = do
 	let options = encode $ fromArray ["offset" /\ Just (show offset)]
 	res <- affjax $ defaultRequest { url = spy $ opt.baseUrl <> opt.token <> "/getUpdates?" <> options, method = Left GET }
 	let parsed = parseMessage res.response
 	liftEff $ log res.response
 	pure parsed
 
-type SendMessageOptions = Array (Tuple String (Maybe String))
+data ParseMode = Html | Markdown
 
-sendMessage :: ∀e. ApiOptions → SendMessageOptions → ChannelId → String → Aff (ajax :: AJAX | e) Json
-sendMessage apiOpts sendOpts channelId message = do
-	let options = encode $ fromArray $ sendOpts <> ["chat_id" /\ Just (show channelId), "text" /\ Just message]
+urlEncodeParseMode :: ParseMode → String
+urlEncodeParseMode Html = "HTML"
+urlEncodeParseMode Markdown = "Markdown"
+
+data CustomKeyboard 
+	= InlineKeyboardMarkup
+	| ReplyKeyboardMarkup
+	| ReplyKeyboardRemove
+	| ForceReply
+
+newtype SendMessageOptions = SendMessageOptions 
+	{ parseMode :: Maybe ParseMode
+	, disable_web_page_preview :: Maybe Boolean
+	, disable_notifications :: Maybe Boolean
+	, reply_to_message_id :: Maybe Int
+	, reply_markup :: Maybe CustomKeyboard
+	}
+
+instance sendMessageOptions :: Default SendMessageOptions where
+	default = SendMessageOptions 
+		{ parseMode : Nothing
+		, disable_web_page_preview : Nothing
+		, disable_notifications : Nothing
+		, reply_to_message_id : Nothing
+		, reply_markup : Nothing
+		}
+
+urlEncodeSendMessageOptions :: SendMessageOptions → Array (String /\ Maybe String)
+urlEncodeSendMessageOptions (SendMessageOptions {parseMode, disable_web_page_preview, disable_notifications, reply_to_message_id, reply_markup}) = 
+	[ "parseMode" /\ map urlEncodeParseMode parseMode
+	, "disable_web_page_preview" /\ map show disable_web_page_preview
+	, "disable_notifications" /\ map show disable_notifications
+	, "reply_to_message_id" /\ map show reply_to_message_id
+	, "reply_markup" /\ Nothing -- TODO: correct value
+	]
+
+sendMessage :: ∀e. ApiOptions → (SendMessageOptions → SendMessageOptions) → ChatId → String → Aff (ajax :: AJAX | e) Json
+sendMessage (ApiOptions apiOpts) optionate chatId message = do
+	let options = encode $ fromArray $ urlEncodedOpts <> ["chat_id" /\ Just (show chatId), "text" /\ Just message]
 	res <- get (apiOpts.baseUrl <> apiOpts.token <> "/sendMessage?" <> options)
 	pure res.response
+	where 
+		sendOpts = optionate default
+		urlEncodedOpts = urlEncodeSendMessageOptions sendOpts
 
 parseMessage :: String → Either (NonEmptyList ForeignError) GetUpdates
 parseMessage msg = runExcept $ decodeJSON msg
 
-type ChannelId = Int
+type ChatId = Int
 
 -- | [User Object](https://core.telegram.org/bots/api#user)
 newtype User = User
