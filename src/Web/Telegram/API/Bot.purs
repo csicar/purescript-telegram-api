@@ -8,14 +8,16 @@ import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Except (runExcept)
 import Control.Monad.Rec.Class (Step(Loop), tailRecM)
-import Data.Argonaut (JBoolean, Json, encodeJson)
+import Data.Argonaut (class EncodeJson, JAssoc, JBoolean, Json, encodeJson, jsonEmptyObject, jsonNull, jsonSingletonObject, toString, (:=), (~>))
+import Data.Argonaut.Encode ((:=?), (~>?))
 import Data.Default (class Default, class PartialDefault, default, withRequired)
 import Data.Either (Either(..))
 import Data.Foldable (maximum)
-import Data.Foreign (ForeignError)
-import Data.Foreign.Class (class Decode)
-import Data.Foreign.Generic (decodeJSON, encodeJSON, genericDecode)
+import Data.Foreign (ForeignError, toForeign)
+import Data.Foreign.Class (class Decode, class Encode)
+import Data.Foreign.Generic (decodeJSON, defaultOptions, encodeJSON, genericDecode, genericEncode)
 import Data.Foreign.Generic as FG
+import Data.Foreign.Generic.Types (SumEncoding(..))
 import Data.FormURLEncoded (encode, fromArray)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
@@ -26,6 +28,7 @@ import Data.Newtype (class Newtype, unwrap)
 import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested ((/\), type (/\))
 import Debug.Trace (spy)
+import Global.Unsafe (unsafeStringify)
 import Network.HTTP.Affjax (AJAX, affjax, defaultRequest, get)
 import Type.Data.Boolean (kind Boolean)
 
@@ -71,11 +74,79 @@ urlEncodeParseMode :: ParseMode → String
 urlEncodeParseMode Html = "HTML"
 urlEncodeParseMode Markdown = "Markdown"
 
+newtype InlineKeyboardButton = InlineKeyboardButton 
+	{ text :: String
+	, url :: Maybe String
+	, callback_data :: Maybe String
+	, switch_inline_query :: Maybe String
+	, switch_inline_query_current_chat :: Maybe String
+	-- , callback_game :: CallbackGame
+	, pay :: Maybe Boolean
+	}
+
+derive instance genericInlineKeyboardButton :: Generic InlineKeyboardButton _
+derive instance newtypeInlineKeyboardButton :: Newtype InlineKeyboardButton _
+
+instance showInlineKeyboardButton :: Show InlineKeyboardButton where show = genericShow
+
+instance encodeJsonInlineKeyboardButton ∷ EncodeJson InlineKeyboardButton where
+  encodeJson (InlineKeyboardButton 
+  	{text
+	, url
+	, callback_data
+	, switch_inline_query
+	, switch_inline_query_current_chat
+	, pay
+	}) = 
+			"text" := encodeJson text 
+		~> "pay" :=? pay
+		~>? "url" :=? map encodeJson url
+		~>? "callback_data" :=? map encodeJson callback_data
+		~>? "switch_inline_query" :=? map encodeJson switch_inline_query
+		~>? "switch_inline_query_current_chat" :=? map encodeJson switch_inline_query_current_chat
+
+instance particalDefaultInlineKeyboardButton ∷ PartialDefault InlineKeyboardButton {text :: String} where 
+	withRequired {text} = InlineKeyboardButton 
+		{ text
+		, url : Nothing
+		, callback_data : Nothing
+		, switch_inline_query : Nothing
+		, switch_inline_query_current_chat : Nothing
+		, pay : Nothing
+		}
+
+data Request = RequestContact | RequestLocation
+
+data KeyboardButton 
+	= KeyboardStringButton String
+	| KeyboardRequestButton String Request
+
+instance encodeJsonKeyboardButton :: EncodeJson KeyboardButton where
+	encodeJson (KeyboardStringButton s) = "text" := s ~> jsonEmptyObject
+	encodeJson (KeyboardRequestButton s req) = spy $ "text" := s ~> (attrName req) := true ~> jsonEmptyObject
+		where
+			attrName RequestContact = "request_contact"
+			attrName RequestLocation = "request_location"
+
 data CustomKeyboard 
-	= InlineKeyboardMarkup
-	| ReplyKeyboardMarkup
+	= InlineKeyboardMarkup (Array (Array InlineKeyboardButton))
+	| ReplyKeyboardMarkup 
+		{ keyboard :: Array (Array KeyboardButton)
+		, resize_keyboard :: Maybe Boolean		
+		, one_time_keyboard :: Maybe Boolean
+		, selective :: Maybe Boolean
+		}
 	| ReplyKeyboardRemove
 	| ForceReply
+
+instance encodeJsonCustomKeyboard ∷ EncodeJson CustomKeyboard where
+	encodeJson (InlineKeyboardMarkup a) = jsonSingletonObject "inline_keyboard" (encodeJson a)
+	encodeJson (ReplyKeyboardMarkup a) =
+		"keyboard" :=  a.keyboard
+		~> "resize_keyboard" :=? a.resize_keyboard
+		~>? "one_time_keyboard" :=? a.one_time_keyboard
+		~>? "selective" :=? a.selective
+	encodeJson _ = jsonNull -- TODO : complete
 
 newtype SendMessageOptions = SendMessageOptions 
 	{ parseMode :: Maybe ParseMode
@@ -84,6 +155,8 @@ newtype SendMessageOptions = SendMessageOptions
 	, reply_to_message_id :: Maybe Int
 	, reply_markup :: Maybe CustomKeyboard
 	}
+
+derive instance newtypeSendMessageOptions ∷ Newtype SendMessageOptions _
 
 instance sendMessageOptions :: Default SendMessageOptions where
 	default = SendMessageOptions 
@@ -100,17 +173,16 @@ urlEncodeSendMessageOptions (SendMessageOptions {parseMode, disable_web_page_pre
 	, "disable_web_page_preview" /\ map show disable_web_page_preview
 	, "disable_notifications" /\ map show disable_notifications
 	, "reply_to_message_id" /\ map show reply_to_message_id
-	, "reply_markup" /\ Nothing -- TODO: correct value
+	, "reply_markup" /\  map (encodeJson >>> show >>> spy) reply_markup
 	]
 
-sendMessage :: ∀e. ApiOptions → (SendMessageOptions → SendMessageOptions) → ChatId → String → Aff (ajax :: AJAX | e) Json
-sendMessage (ApiOptions apiOpts) optionate chatId message = do
-	let options = encode $ fromArray $ urlEncodedOpts <> ["chat_id" /\ Just (show chatId), "text" /\ Just message]
+sendMessage :: ∀e. ApiOptions → SendMessageOptions → ChatId → String → Aff (ajax :: AJAX | e) Json
+sendMessage (ApiOptions apiOpts) options chatId message = do
+	let options = spy $ encode $ fromArray $ urlEncodedOpts <> ["chat_id" /\ Just (show chatId), "text" /\ Just message]
 	res <- get (apiOpts.baseUrl <> apiOpts.token <> "/sendMessage?" <> options)
 	pure res.response
 	where 
-		sendOpts = optionate default
-		urlEncodedOpts = urlEncodeSendMessageOptions sendOpts
+		urlEncodedOpts = urlEncodeSendMessageOptions options
 
 parseMessage :: String → Either (NonEmptyList ForeignError) GetUpdates
 parseMessage msg = runExcept $ decodeJSON msg
@@ -230,6 +302,7 @@ newtype GetUpdates = GetUpdates
 	}
 
 derive instance genericGetUpdates :: Generic GetUpdates _
+derive instance newtypeGetUpdates :: Newtype GetUpdates _
 
 instance showGetUpdates ∷ Show GetUpdates where show = genericShow
 
